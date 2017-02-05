@@ -1,0 +1,16 @@
+bl_info = {
+	"name": "Raco's BGE Tools",
+	"author": "Raf Colson",
+	"version": (0, 0, 3),
+	"blender": (2, 79, 2),
+	"location": "SpaceBar Search -> BGE-Tools: UV Scroll / UV Transform / UV Texture Data / LOD Sections",
+	"description": "Tools for the Blender Game Engine",
+	"warning": "Requires Blender version prior to 2.8",
+	"wiki_url": "https://github.com/rafcolson/bge-tools/wiki",
+	"tracker_url": "https://github.com/rafcolson/bge-tools/issues",
+	"category": "Game Engine"
+}
+
+from .ops import modules
+from .ops.utils import Utils as ut
+register, unregister = ut.init_reloadable_addon(modules, locals())
