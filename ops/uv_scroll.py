@@ -1,12 +1,20 @@
 import bpy
-from os.path import join as j
+from . import utils as ut
 
 TOOL_NAME = "bge_tools_uv_scroll"
-SCRIPT_NAME = TOOL_NAME + ".py"
-MODULE_NAME = TOOL_NAME + ".main"
-SCRIPT_PATH = j("bge-tools", "gen", SCRIPT_NAME)
+LABEL_UV_MAP = "UV Map:"
+LABEL_SPRITES = "Sprites:"
+LABEL_SEQUENCE = "Sequence:"
 
-PROP_SPRITES_DEFAULT = (8, 8)
+PROP_NAME_SPRITES_X = "SPRITES_X"
+PROP_NAME_SPRITES_Y = "SPRITES_Y"
+PROP_NAME_SEQUENCE = "SEQUENCE"
+PROP_NAME_LOOP = "LOOP"
+PROP_NAME_PINGPONG = "PINGPONG"
+PROP_NAME_LINKED = "LINKED"
+
+PROP_SPRITES_X_DEFAULT = 8
+PROP_SPRITES_Y_DEFAULT = 8
 PROP_SEQUENCE_DEFAULT = "0-63"
 PROP_SKIP_DEFAULT = 0
 PROP_LOOP_DEFAULT = -1
@@ -25,8 +33,9 @@ class UVScroll(bpy.types.Operator):
 	bl_options = {"REGISTER", "UNDO"}
 	
 	prop_uv_texture_name = bpy.props.StringProperty(name="UV Map", description="UV Map to be scrolled")
-	prop_sprites = bpy.props.IntVectorProperty(name="Sprites", description="Number of sprites horizontally (X) and vertically (Y)", min=1, subtype="XYZ", size=2)
-	prop_sequence = bpy.props.StringProperty(name="Sequence", description="Animation sequence. Example: \'0*2, 1-5, 7\' gives \'0, 0, 0, 1, 2, 3, 4, 5, 7\'")
+	prop_sprites_x = bpy.props.IntProperty(name="X", description="Number of sprites horizontally (X)", min=1)
+	prop_sprites_y = bpy.props.IntProperty(name="Y", description="Number of sprites horizontally (Y)", min=1)
+	prop_sequence = bpy.props.StringProperty(name="", description="Animation sequence. Example: \'0*2, 1-5, 7\' gives \'0, 0, 0, 1, 2, 3, 4, 5, 7\'")
 	prop_skip = bpy.props.IntProperty(name="Skip", description="Number of logic tics to skip", min=0)
 	prop_loop = bpy.props.IntProperty(name="Loop", description="Loop count; -1 infinite", min=-1)
 	prop_pingpong = bpy.props.BoolProperty(name="Pingpong", description="Reverse the sequence with every loop")
@@ -35,17 +44,20 @@ class UVScroll(bpy.types.Operator):
 	def invoke(self, context, event):
 		
 		def init():
-			self.uv_textures = context.object.data.uv_textures
+			object = context.object
+			sensors = object.game.sensors
+			properties = object.game.properties
+			self.uv_textures = object.data.uv_textures
 			self.prop_uv_texture_name = self.uv_textures[0].name if self.uv_textures else ""
-			self.obj_props = context.object.game.properties
-			self.prop_sprites = [int(s) for s in self.obj_props["sprites"].value.replace(" ", "").split(",")] if "sprites" in self.obj_props else PROP_SPRITES_DEFAULT
-			self.prop_sequence = self.obj_props["sequence"].value if "sequence" in self.obj_props else PROP_SEQUENCE_DEFAULT
-			sensors = context.object.game.sensors
-			self.prop_skip = sensors[TOOL_NAME].tick_skip if TOOL_NAME in sensors else PROP_SKIP_DEFAULT
-			self.prop_loop = self.obj_props["loop"].value if "loop" in self.obj_props else PROP_LOOP_DEFAULT
-			self.prop_pingpong = self.obj_props["pingpong"].value if "pingpong" in self.obj_props else PROP_PINGPONG_DEFAULT
-			self.prop_linked = self.obj_props["linked"].value if "linked" in self.obj_props else PROP_LINKED_DEFAULT
-			self.duplicate = context.object.data in [o.data for o in bpy.data.objects if o != context.object]
+			self.prop_sequence = properties[PROP_NAME_SEQUENCE].value if PROP_NAME_SEQUENCE in properties else PROP_SEQUENCE_DEFAULT
+			self.prop_sprites_x = properties[PROP_NAME_SPRITES_X].value if PROP_NAME_SPRITES_X in properties else PROP_SPRITES_X_DEFAULT
+			self.prop_sprites_y = properties[PROP_NAME_SPRITES_Y].value if PROP_NAME_SPRITES_Y in properties else PROP_SPRITES_Y_DEFAULT
+			module_name = TOOL_NAME + "_update"
+			self.prop_skip = sensors[module_name].tick_skip if module_name in sensors else PROP_SKIP_DEFAULT
+			self.prop_loop = properties[PROP_NAME_LOOP].value if PROP_NAME_LOOP in properties else PROP_LOOP_DEFAULT
+			self.prop_pingpong = properties[PROP_NAME_PINGPONG].value if PROP_NAME_PINGPONG in properties else PROP_PINGPONG_DEFAULT
+			self.prop_linked = properties[PROP_NAME_LINKED].value if PROP_NAME_LINKED in properties else PROP_LINKED_DEFAULT
+			self.duplicate = object.data in [o.data for o in bpy.data.objects if o != object]
 			self.error = None
 			
 		if context.object:
@@ -69,21 +81,42 @@ class UVScroll(bpy.types.Operator):
 			box.label(self.error, icon="ERROR")
 			return
 			
-		row = box.row(True)
-		row.prop_search(self, "prop_uv_texture_name",  context.object.data, "uv_textures")
+		row = box.row()
+		split = row.split(0.25, True)
+		col = split.column()
+		col.label(LABEL_UV_MAP)
+		
+		split = split.split()
+		row = split.row(True)
+		row.prop_search(self, "prop_uv_texture_name",  context.object.data, "uv_textures", "")
+		row.operator("mesh.uv_texture_remove", text="", icon="ZOOMOUT")
+		row.operator("mesh.uv_texture_add", text="", icon="ZOOMIN")
 		
 		row = box.row(True)
-		row.prop(self, "prop_sprites")
+		split = row.split(0.25, True)
+		col = split.column()
+		col.label(LABEL_SEQUENCE)
 		
-		row = box.row(True)
+		split = split.split()
+		row = split.row(True)
 		row.prop(self, "prop_sequence")
+		
+		row = box.row(True)
+		split = row.split(0.25, True)
+		col = split.column()
+		col.label(LABEL_SPRITES)
+		
+		split = split.split()
+		row = split.row(True)
+		row.prop(self, "prop_sprites_x")
+		row.prop(self, "prop_sprites_y")
 		
 		row = box.row(True)
 		row.prop(self, "prop_skip")
 		row.prop(self, "prop_loop")
 		row.prop(self, "prop_pingpong", toggle=True)
 		
-		if self.duplicate:
+		if self.duplicate or not self.prop_linked:
 			row.prop(self, "prop_linked", toggle=True)
 			
 		row.operator("bge_tools.uv_scroll_clear", text="", icon="X")
@@ -93,57 +126,23 @@ class UVScroll(bpy.types.Operator):
 		if self.error:
 			return {"CANCELLED"}
 			
-		def add_properties():
-			if "sprites" not in self.obj_props:
-				bpy.ops.object.game_property_new(type="STRING", name="sprites")
-			if "sequence" not in self.obj_props:
-				bpy.ops.object.game_property_new(type="STRING", name="sequence")
-			if "loop" not in self.obj_props:
-				bpy.ops.object.game_property_new(type="INT", name="loop")
-			if "pingpong" not in self.obj_props:
-				bpy.ops.object.game_property_new(type="BOOL", name="pingpong")
-			if "linked" not in self.obj_props:
-				bpy.ops.object.game_property_new(type="BOOL", name="linked")
-				
-		def set_properties():
-			self.obj_props["sprites"].value = str(list(self.prop_sprites))[1:-1]
-			self.obj_props["sequence"].value = self.prop_sequence
-			self.obj_props["loop"].value = self.prop_loop
-			self.obj_props["pingpong"].value = self.prop_pingpong
-			self.obj_props["linked"].value = self.prop_linked
+		def generate_game_logic():
+			ut.add_game_property(context.object, PROP_NAME_SEQUENCE, self.prop_sequence)
+			ut.add_game_property(context.object, PROP_NAME_SPRITES_X, self.prop_sprites_x)
+			ut.add_game_property(context.object, PROP_NAME_SPRITES_Y, self.prop_sprites_y)
+			ut.add_game_property(context.object, PROP_NAME_LOOP, self.prop_loop)
+			ut.add_game_property(context.object, PROP_NAME_PINGPONG, self.prop_pingpong)
+			ut.add_game_property(context.object, PROP_NAME_LINKED, self.prop_linked)
+			ut.remove_logic(context.object, TOOL_NAME)
+			ut.add_text(self.bl_idname, True, TOOL_NAME)
+			ut.add_logic_python(context.object, TOOL_NAME, "update", True, tick_skip=self.prop_skip)
 			
-		def add_logic():
-			
-			if TOOL_NAME not in context.object.game.controllers:
-				bpy.ops.logic.controller_add(type="PYTHON", name=TOOL_NAME, object=context.object.name)
-				
-			if TOOL_NAME not in context.object.game.sensors:
-				bpy.ops.logic.sensor_add(type="ALWAYS", name=TOOL_NAME, object=context.object.name)
-				
-			sens = context.object.game.sensors[TOOL_NAME]
-			sens.use_pulse_true_level = True
-			sens.tick_skip = self.prop_skip
-			cont = context.object.game.controllers[TOOL_NAME]
-			cont.mode = "MODULE"
-			cont.module = MODULE_NAME
-			
-			cont.link(sensor=sens)
-			
-		def add_script_internal():
-			
-			if SCRIPT_NAME in bpy.data.texts:
-				bpy.data.texts.remove(bpy.data.texts[SCRIPT_NAME], do_unlink=True)
-				
-			addons_paths = bpy.utils.script_paths("addons")
-			url = j(addons_paths[0], SCRIPT_PATH)
-			text = bpy.ops.text.open(filepath=url, internal=True)
-			if text != {"FINISHED"}:
-				url = j(addons_paths[1], SCRIPT_PATH)
-				bpy.ops.text.open(filepath=url, internal=True)
-	
-		def set_uv_texture():
+		def update_uv_texture():
 			
 			if not self.prop_uv_texture_name:
+				return
+				
+			if self.prop_uv_texture_name not in self.uv_textures:
 				return
 				
 			uv_texture = self.uv_textures[self.prop_uv_texture_name]
@@ -157,17 +156,14 @@ class UVScroll(bpy.types.Operator):
 			bpy.ops.uv.select_all(action="SELECT")
 			bpy.ops.uv.cursor_set(location=(0.0, 0.0))
 			context.space_data.pivot_point = "CURSOR"
-			bpy.ops.transform.resize(value=[1/i for i in self.prop_sprites] + [1])
+			bpy.ops.transform.resize(value=[1 / self.prop_sprites_x, 1 / self.prop_sprites_y, 1])
 			context.area.type = area_type
 			bpy.ops.uv.select_all(action="DESELECT")
 			bpy.ops.mesh.select_all(action="DESELECT")
 			bpy.ops.object.mode_set(mode="OBJECT")
 			
-		add_properties()
-		set_properties()
-		add_logic()
-		add_script_internal()
-		set_uv_texture()
+		generate_game_logic()
+		update_uv_texture()
 		
 		return {"PASS_THROUGH"}
 		
@@ -179,16 +175,18 @@ class UVScrollClear(bpy.types.Operator):
 	bl_options = {"INTERNAL"}
 	
 	def execute(self, context):
+		prop_names = [
+			PROP_NAME_SPRITES_X,
+			PROP_NAME_SPRITES_Y,
+			PROP_NAME_SEQUENCE,
+			PROP_NAME_LOOP,
+			PROP_NAME_PINGPONG,
+			PROP_NAME_LINKED
+		]
+		ut.remove_game_properties(context.object, prop_names)
+		ut.remove_logic(context.object, TOOL_NAME)
+		ut.remove_text(TOOL_NAME)
 		
-		for i in range(len(context.object.game.properties)):
-			bpy.ops.object.game_property_remove(i)
-			
-		bpy.ops.logic.controller_remove(controller=TOOL_NAME, object=context.object.name)
-		bpy.ops.logic.sensor_remove(sensor=TOOL_NAME, object=context.object.name)
-		
-		if SCRIPT_NAME in bpy.data.texts:
-			bpy.data.texts.remove(bpy.data.texts[SCRIPT_NAME], do_unlink=True)
-			
 		return {"FINISHED"}
 		
 def register():
