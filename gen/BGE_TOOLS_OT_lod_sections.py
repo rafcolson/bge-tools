@@ -9,6 +9,8 @@ LOD_SECTIONS_PROP_NAME = "BGE_TOOLS_LOD_SECTIONS"
 LOD_PROGRESS_PROP_NAME = "BGE_TOOLS_LOD_PROGRESS"
 LOD_SIZE_PROP_NAME = "BGE_TOOLS_LOD_SIZE"
 
+LIB_NEW_ID_PROP_NAME = "LIB_NEW_ID"
+
 SECT_SUFFIX = "_SECT"
 PHYSICS_SUFFIX = "_PHYS"
 LOD_SUFFIX = "_LOD"
@@ -47,6 +49,7 @@ class LODSections(types.KX_GameObject):
 	sections = []
 	visual_sections = []
 	physical_sections = []
+	num_lib_news = {}
 	
 	loading_progress = 0.0
 	
@@ -157,6 +160,7 @@ class LODSections(types.KX_GameObject):
 				inst.setParent(self, False, False)
 				inst.localTransform = self.localTransform * inst.localTransform
 				self.sections.append(inst)
+				self.num_lib_news[ob_name] = {}
 				
 		for ob in self.children:
 			if ob.groupMembers is not None:
@@ -183,6 +187,16 @@ class LODSections(types.KX_GameObject):
 				if ob.parent is None:
 					l.append(ob)
 			return l
+			
+		def get_id(o, suffix=".", num_digits=3):
+			s = suffix
+			d = str(o)
+			n = len(d)
+			if n < num_digits:
+				for i in range(num_digits - n):
+					s += "0"
+			s += d
+			return s
 			
 		physical_sections = [sect.name for sect in self.sections if sect.currentLodLevel == 1]
 		for sect in list(self.physical_sections):
@@ -212,15 +226,23 @@ class LODSections(types.KX_GameObject):
 			if sect not in visual_sections:
 				self.visual_sections.remove(sect)
 				for inst in self.scene.objects[sect].children:
+					lib_new_name = None
+					if LIB_NEW_ID_PROP_NAME in inst:
+						sect_id = sect.split(SECT_SUFFIX)[1]
+						lib_new_id = inst[LIB_NEW_ID_PROP_NAME]
+						lib_new_name = SECT_SUFFIX + sect_id + lib_new_id
 					inst.endObject()
-					
+					if lib_new_name is not None:
+						logic.LibFree(lib_new_name)
+				self.num_lib_news[sect].clear()
+				
 		for sect in visual_sections:
 			if sect not in self.visual_sections:
 				self.visual_sections.append(sect)
 				for n, nl in self.instances[sect].items():
 					for l in nl:
 						inst = self.scene.addObject(n)
-						inst.setParent(sect, False, False)
+						inst.setParent(self.scene.objects[sect], True, False)
 						m = Matrix()
 						m[:] = l[0]
 						gpl = get_group_parents(inst)
@@ -231,6 +253,18 @@ class LODSections(types.KX_GameObject):
 							inst.worldTransform = self.localTransform * m
 						for k, v in l[1].items():
 							inst[k] = v
+						if LIB_NEW_ID_PROP_NAME in inst:
+							lib_new_id = inst[LIB_NEW_ID_PROP_NAME]
+							if not lib_new_id:
+								d = self.num_lib_news[sect]
+								if n not in d:
+									d[n] = 0
+								inst[LIB_NEW_ID_PROP_NAME] = lib_new_id = n + get_id(d[n])
+								d[n] += 1
+							sect_id = sect.split(SECT_SUFFIX)[1]
+							lib_new_name = SECT_SUFFIX + sect_id + lib_new_id
+							new_mesh = logic.LibNew(lib_new_name, "Mesh", [inst.meshes[0].name])[0]
+							inst.replaceMesh(new_mesh, True, True)
 							
 	def add_instance(self, ob, transform, properties={}):
 		
