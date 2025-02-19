@@ -1,7 +1,9 @@
 from . import (
 	uv_scroll,
 	uv_transform,
-	lod_sections
+	uv_texture_data,
+	lod_sections,
+	test
 )
 
-modules = [uv_scroll, uv_transform, lod_sections]
+modules = [test, uv_scroll, uv_transform, uv_texture_data, lod_sections]

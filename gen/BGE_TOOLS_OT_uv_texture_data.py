@@ -1,6 +1,6 @@
+import os, numpy, gzip, typing
 from bge import logic, types, render
 from mathutils import Vector
-import os, numpy, gzip, typing
 
 class UVTextureData:
 	
@@ -10,14 +10,14 @@ class UVTextureData:
 
 		_CLRS = dict(
 			{
-				"W":"#000000",
+				"W":"#FFFFFF",
 				"R":"#FF0000",
 				"G":"#00FF00",
 				"B":"#0000FF",
 				"C":"#00FFFF",
 				"M":"#FF00FF",
 				"Y":"#FFFF00",
-				"K":"#FFFFFF",
+				"K":"#000000",
 			}
 		)
 		_hexes = []
