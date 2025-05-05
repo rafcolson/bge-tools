@@ -1,1 +1,1 @@
-Rigid body: suspend fix by setting mass
+Fix physical sections

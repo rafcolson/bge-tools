@@ -391,7 +391,7 @@ class LODSections(types.Operator):
 						n = p.name
 						if n not in self.lod_tmps:
 							self.lod_tmps[n] = []
-						m = ob.matrix_world
+						m = ob.matrix_world.copy()
 						d = {ob.name: ob.value for ob in ob.game.properties}
 						self.lod_tmps[n].append([m, d])
 				else:

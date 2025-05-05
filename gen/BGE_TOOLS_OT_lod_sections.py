@@ -275,13 +275,12 @@ class LODSectionsUtils(object):
 
 	@staticmethod
 	def get_group_parents(instance: KX_GameObject) -> Optional[List[KX_GameObject]]:
-		if instance.groupMembers is None:
-			return None
 		l = []
-		for obj in instance.groupMembers:
-			if obj.parent is None:
-				l.append(obj)
-		return l		
+		if instance.groupMembers:
+			for obj in instance.groupMembers:
+				if obj.parent is None:
+					l.append(obj)
+		return l
 
 	@staticmethod
 	def get_group_parent(instance: KX_GameObject) -> Optional[KX_GameObject]:
@@ -508,14 +507,16 @@ class LODSections(KX_GameObject):
 			self.__physical_sections.remove(sect_name)
 			self.scene.objects[sect_name + PHYSICS_SFX].endObject()
 
-	def __add_physical_sections(self, physical_sections: List[str]):
+	def __add_physical_sections(self, physical_sections: List[str], init: bool = False):
 		for sect_name in physical_sections:
-			if sect_name in self.__physical_sections:
-				continue
+			if not init:
+				if sect_name in self.__physical_sections:
+					continue
 
 			self.__physical_sections.append(sect_name)
 			inst = self.scene.addObject(sect_name + PHYSICS_SFX)
 			inst.setParent(self, False, False)
+			inst.worldTransform = self.worldTransform * inst.worldTransform
 			if sect_name not in self.__instances:
 				continue
 
@@ -525,9 +526,8 @@ class LODSections(KX_GameObject):
 
 				for l in nl:
 					o = self.scene.addObject(n + PHYSICS_SFX)
-					m = self.worldTransform * Matrix(l[0])
 					o.setParent(inst, False, False)
-					o.worldTransform = m
+					o.worldTransform = Matrix(l[0])
 
 	def __remove_visual_sections(self, visual_sections: List[str] = []):
 		for sect_name in list(self.__visual_sections):
@@ -554,40 +554,36 @@ class LODSections(KX_GameObject):
 
 			sect.endObject()
 
-	def __add_visual_sections(self, visual_sections: List[str]):
-		for sect_name in visual_sections:
-			if sect_name in self.__visual_sections:
-				continue
-
-			self.__visual_sections.append(sect_name)
-			sect = self.scene.addObject(sect_name)
-			sect.setParent(self, False, False)
-			sect.worldTransform = self.worldTransform * sect.worldTransform
-
-			if sect_name in self.__dynamic_instances:
-				for name, d in self.__dynamic_instances[sect_name].items():
-					for id, l in d.items():
-						inst, data = l
-						if not inst:
-							transform, properties = data
-							m = self.worldTransform * Matrix(transform)
-							if ut.CUST_PROP_NAME in properties:
-								cls = properties[ut.CUST_PROP_NAME]
-								id = properties[ut.ID_PROP_NAME]
-								inst = ut.add_mutated(self.scene, name, cls, id, props=properties, matrix_world=m)
-							else:
-								inst = ut.add_object(self.scene, name, props=properties, matrix_world=m)
-							inst.suspendDynamics()
-							l[0] = inst
-							print("Added to {}: {}".format(sect_name, id))
-
+	def __add_dynamic_instances(self, sect_name: str, init: bool = False):
+		if sect_name in self.__dynamic_instances:
+			for name, d in self.__dynamic_instances[sect_name].items():
+				for id, l in d.items():
+					inst, data = l
+					if init and inst:
+						continue
+					transform, properties = data
+					m = self.worldTransform * Matrix(transform)
+					if ut.CUST_PROP_NAME in properties:
+						cls = properties[ut.CUST_PROP_NAME]
+						id = properties[ut.ID_PROP_NAME]
+						inst = ut.add_mutated(self.scene, name, cls, id, props=properties, matrix_world=m)
+						if inst:
+							print("Added mutated to {}: {}".format(sect_name, id))
+					else:
+						inst = ut.add_object(self.scene, name, props=properties, matrix_world=m)
+						print("Added to {}: {}".format(sect_name, id))
+					if init and inst:
+						inst.suspendDynamics()
+					l[0] = inst
+		
+	def __add_static_instances(self, sect_name: str):
 			if sect_name in self.__instances:
 				for name, nl in self.__instances[sect_name].items():
 					for l in nl:
 						inst = self.scene.addObject(name)
-						inst.setParent(self.scene.objects[sect_name], True, False)
+						inst.setParent(self.scene.objects[sect_name], False, False)
 						transform, properties = l
-						m = self.worldTransform * Matrix(transform)
+						m = Matrix(transform)
 						gpl = ut.get_group_parents(inst)
 						if gpl:
 							for gp in gpl:
@@ -607,6 +603,24 @@ class LODSections(KX_GameObject):
 							lib_new_name = SECT_SFX + sect_id + lib_new_id
 							new_mesh = logic.LibNew(lib_new_name, "Mesh", [inst.meshes[0].name])[0]
 							inst.replaceMesh(new_mesh, True, True)
+	
+	def __add_visual_sections(self, visual_sections: List[str], init: bool = False):
+		for sect_name in visual_sections:
+			if sect_name in self.__visual_sections:
+				continue
+
+			self.__visual_sections.append(sect_name)
+			sect = self.scene.addObject(sect_name)
+			sect.setParent(self, False, True)
+			sect.worldTransform = self.worldTransform * sect.worldTransform
+
+			self.__add_static_instances(sect_name)
+
+		if init:
+			return
+
+		for sect_name in visual_sections:
+			self.__add_dynamic_instances(sect_name, True)
 
 	def __update_dynamics(self, sect_name: str, name: str, id: str, sections: List[str] = None, suspend: bool = False):
 		d = self.__dynamic_instances[sect_name][name]
@@ -614,7 +628,7 @@ class LODSections(KX_GameObject):
 			return
 		inst = d[id][0]
 		if inst:
-			m = inst.worldTransform * self.worldTransform.inverted()
+			m = self.worldTransform.inverted() * inst.worldTransform
 			transform = [list(v) for v in m.row]
 			properties = ut.get_props(inst)
 			sect_new = self.get_section_name(m.translation.xy)
@@ -776,13 +790,13 @@ class LODSections(KX_GameObject):
 
 		self.visible = False
 		sections_parent = self.scene.objectsInactive[sections_parent_name]
-		self.replaceMesh(sections_parent.meshes[0], True, True)
+		self.replaceMesh(sections_parent.meshes[0], True, False)
 		mat_inv = self.worldTransform.inverted()
 		for obj in self.children:
 			if PART_PROP_NAME in obj:
 				obj.endObject()
 			else:
-				m = obj.worldTransform * mat_inv
+				m = mat_inv * obj.worldTransform
 				l = ut.get_group_parents(obj)
 				if not l:
 					l.append(obj)
@@ -856,15 +870,8 @@ class LODSections(KX_GameObject):
 	def add(self):
 		
 		def add_part(l: List[str]):
-			for sect_name in l:
-				sect = self.scene.addObject(sect_name)
-				sect.setParent(self, False, False)
-				sect.worldTransform = self.worldTransform * sect.worldTransform
-				sect_phys = self.scene.addObject(sect_name + PHYSICS_SFX)
-				sect_phys.setParent(self, False, False)
-				sect_phys.worldTransform = self.worldTransform * sect_phys.worldTransform
-				self.__visual_sections.append(sect_name)
-				self.__physical_sections.append(sect_name)
+			self.__add_visual_sections(l, True)
+			self.__add_physical_sections(l, True)
 				
 		if self.__index == self.__num_parts:
 			self.__index = 0
@@ -878,24 +885,18 @@ class LODSections(KX_GameObject):
         
 		def populate_part(l: List[str]):
 			for sect_name in l:
-				if sect_name in self.__dynamic_instances:
-					for name, d in self.__dynamic_instances[sect_name].items():
-						for id, l in d.items():
-							transform, properties = l[1]
-							m = self.worldTransform * Matrix(transform)
-							if ut.CUST_PROP_NAME in properties:
-								cls = properties[ut.CUST_PROP_NAME]
-								id = properties[ut.ID_PROP_NAME]
-								inst = ut.add_mutated(self.scene, name, cls, id, props=properties, matrix_world=m)
-								if inst:
-									print("Added mutated object to {}: {}".format(sect_name, id))
-							else:
-								inst = ut.add_object(self.scene, name, props=properties, matrix_world=m)
-								print("Added object to {}: {}".format(sect_name, id))
-							l[0] = inst
+				self.__add_dynamic_instances(sect_name, True)
 
 		if self.__index == self.__num_parts:
 			self.__index = 0
+			print("Restoring dynamics for unsettled instances")
+			for sect_name in self.visual_sections:
+				if sect_name in self.__dynamic_instances:
+					for _, d in self.__dynamic_instances[sect_name].items():
+						for _, l in d.items():
+							inst, _ = l
+							if inst:
+								inst.restoreDynamics()
 			self.state = self.STATE_SETTLE
 		else:
 			populate_part(self.__parts[self.__index])
@@ -921,6 +922,14 @@ class LODSections(KX_GameObject):
 		if unsettled_count + len(self.__tmp) == 0:
 			print("Settled all dynamic instances")
 			self.__tmp.clear()
+			if self.__target:
+				self.__target_position = self.__target.worldPosition.copy()
+			visual_sections = self.get_sections(self.__target_position.xy, self.__lod_size)
+			self.__remove_visual_sections(visual_sections)
+			if self.__has_physics:
+				physical_sections = self.__get_physical_sections()
+				self.__remove_physical_sections(physical_sections)
+			print("Starting update state with {}/{} of physical/visual sections".format(len(self.physical_sections), len(self.visual_sections)))
 			self.state = self.STATE_UPDATE
 
 	def update(self):
