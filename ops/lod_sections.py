@@ -44,6 +44,7 @@ NORMALS = "NORMALS"
 
 PHYS_COLLAPSE_RATIO = 0.25
 REMOVE_DOUBLES_THRESHOLD = 0.0001
+BOUNDS_SCALE_FACTOR = 4.0
 
 TO_BE_REPLACED = "LOD_SECTIONS_ZZ_DIRS"
 
@@ -1093,7 +1094,7 @@ class LODSections(types.Operator):
 			bpy.ops.mesh.primitive_plane_add()
 			bounds = self.scene.objects.active
 			bounds.location = (0, 0, -round(0.5 * self.dimensions.z + 2.0))
-			bounds.dimensions.xy = self.dimensions.xy
+			bounds.dimensions.xy = self.dimensions.xy * BOUNDS_SCALE_FACTOR
 			bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
 			bounds.game.physics_type = "SENSOR"
 			bounds.draw_type = "WIRE"

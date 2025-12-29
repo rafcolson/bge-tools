@@ -34,6 +34,7 @@ INSTANCES = "INSTANCES"
 
 CHUNK_SIZE_MAX = 2048
 PART_SIZE_MAX = 128
+OBJ_BOUNDS_MARGIN = 0.04
 
 class LODSectionsUtils(object):
 
@@ -719,7 +720,7 @@ class LODSections(KX_GameObject):
 							continue
 
 						if not ut.CUST_PROP_NAME in inst.getPropertyNames():
-							inst.worldPosition.z += 0.04
+							inst.worldPosition.z += OBJ_BOUNDS_MARGIN
 						inst.restoreDynamics()
 						print("Restored in {}: {}".format(sect_name, id))
 
@@ -739,13 +740,17 @@ class LODSections(KX_GameObject):
 					for id, (inst, data) in d.items():
 						if hit_obj_id != id or hit_obj is not inst:
 							continue
-						hit_obj.worldTransform = self.worldTransform * Matrix(data[0])
-						self.__suspend_instance(hit_obj)
+						hit_obj.worldLinearVelocity.zero()
+						hit_obj.worldAngularVelocity.zero()
+						v_mp, v_dim = ut.get_median_point_and_dimensions(hit_obj)
+						t = self.worldTransform * Matrix(data[0])
+						t.translation.z += v_dim.z * 0.5 + v_mp.z + OBJ_BOUNDS_MARGIN
+						hit_obj.worldTransform = t
 
-						print("Reset and suspended in {}: {}".format(sect_name, id))
+						print("Set within bounds of {}: {}".format(sect_name, id))
 						return
 
-		elif hit_obj.parent:
+		elif hit_obj.parent is not None:
 			self.__bounds_ccb(hit_obj.parent)
 			return
 
