@@ -11,6 +11,7 @@ ERR_MSG_PROPERTY_NOT_FOUND = "Sections property not found: "
 ERR_MSG_NAME_NOT_FOUND = "Sections object not found: "
 
 ADDON_PFX = "BGE_TOOLS_LOD_"
+ADDON_INFO = ADDON_PFX + "INFO"
 PART_PROP_NAME = ADDON_PFX + "PART"
 SECT_PROP_NAME = ADDON_PFX + "SECTIONS"
 PROG_PROP_NAME = ADDON_PFX + "PROGRESS"
@@ -102,7 +103,7 @@ class LODSectionsUtils(object):
 		return id
 
 	@staticmethod
-	def get_name_id(name: str, excluded: List[str]):
+	def get_name_id(name: str, excluded: List[str] = []) -> str:
 		id_list = []
 		for n in excluded:
 			l = n.rsplit(".")
@@ -120,16 +121,16 @@ class LODSectionsUtils(object):
 	def get_module_and_class(path: str) -> Tuple[Any, Type[Any]]:
 		result = path.rsplit(".", 1)
 		if not result[0] or len(result) == 1:
-			print("Invalid path: {}".format(path))
+			LODSectionsUtils.addon_print("Invalid path: {}".format(path))
 			return None
 		mod_name, cls_name = result
 		mod = LODSectionsUtils.get_module(mod_name)
 		if not mod:
-			print("Invalid module name: {}".format(mod_name))
+			LODSectionsUtils.addon_print("Invalid module name: {}".format(mod_name))
 			return None
 		cls = getattr(mod, cls_name, None)
 		if not cls:
-			print("Invalid class name: {}".format(cls_name))
+			LODSectionsUtils.addon_print("Invalid class name: {}".format(cls_name))
 			return None
 		return mod, cls
 
@@ -237,7 +238,7 @@ class LODSectionsUtils(object):
 			assert(old_obj.invalid)
 			assert(new_obj is cont.owner)
 		else:
-			print("Invalid handle: {}".format(LODSectionsUtils.get_class_name(handle)))
+			LODSectionsUtils.addon_print("Invalid handle: {}".format(LODSectionsUtils.get_class_name(handle)))
 			return None
 		return new_obj
 
@@ -313,11 +314,11 @@ class LODSectionsUtils(object):
 						result = True
 						if not len(d):
 							del mod_instances[cls_name]
-						print("Removed module instance of {}: {}".format(cls_name, id))
+						LODSectionsUtils.addon_print("Removed module instance of {}: {}".format(cls_name, id))
 				if not len(mod_instances):
 					mod = LODSectionsUtils.get_class_module(LODSectionsUtils.get_class(object))
 					delattr(mod, LODSectionsUtils.INST_ATTR_NAME)
-					print("Removed: {}.{}".format(mod.__name__, LODSectionsUtils.INST_ATTR_NAME))
+					LODSectionsUtils.addon_print("Removed: {}.{}".format(mod.__name__, LODSectionsUtils.INST_ATTR_NAME))
 		return result
 
 	@staticmethod
@@ -365,13 +366,19 @@ class LODSectionsUtils(object):
 	# file utils
 
 	@staticmethod
-	def read_zlibbed(file_path):
+	def read_zlibbed(file_path: str) -> Any:
 		if not os.path.exists(file_path):
 			return None
 		with open(file_path, "rb") as f:
 			zz = f.read()
 		data = pickle.loads(zlib.decompress(zz))
 		return data
+	
+	# profile utils
+
+	@staticmethod
+	def addon_print(*args: Any):
+		print("{}:".format(ADDON_INFO), *args)
 
 ut = LODSectionsUtils
 
@@ -418,6 +425,7 @@ class LODSections(KX_GameObject):
 		self.__loading_progress = 0.0
 		self.__visual_sections = []
 		self.__physical_sections = []
+		self.__players = {}
 
 		self.state = self.STATE_INIT
 
@@ -505,6 +513,21 @@ class LODSections(KX_GameObject):
 			if sect_name in physical_sections:
 				continue
 
+			if sect_name in self.__dynamic_instances:
+				for name, d in self.__dynamic_instances[sect_name].items():
+					for id, (inst, _) in d.copy().items():
+						if inst is None:
+							continue
+						self.__update_dynamics(sect_name, name, id, self.visual_sections)
+
+			if sect_name in self.__dynamic_instances:
+				for name, d in self.__dynamic_instances[sect_name].items():
+					for id, (inst, _) in d.items():
+						if inst is None:
+							continue
+						self.__suspend_instance(inst)
+						ut.addon_print("Suspended in {}: {}".format(sect_name, id))
+
 			self.__physical_sections.remove(sect_name)
 			self.scene.objects[sect_name + PHYSICS_SFX].endObject()
 
@@ -569,12 +592,12 @@ class LODSections(KX_GameObject):
 						id = properties[ut.ID_PROP_NAME]
 						inst = ut.add_mutated(self.scene, name, cls, id, props=properties, matrix_world=m)
 						if inst:
-							print("Added mutated to {}: {}".format(sect_name, id))
+							ut.addon_print("Added mutated to {}: {}".format(sect_name, id))
 					else:
 						inst = ut.add_object(self.scene, name, props=properties, matrix_world=m)
-						print("Added to {}: {}".format(sect_name, id))
+						ut.addon_print("Added to {}: {}".format(sect_name, id))
 					if init and inst:
-						inst.suspendDynamics()
+						self.__suspend_instance(inst)
 					l[0] = inst
 		
 	def __add_static_instances(self, sect_name: str):
@@ -635,6 +658,9 @@ class LODSections(KX_GameObject):
 			sect_new = self.get_section_name(m.translation.xy)
 			is_moved = sect_name != sect_new
 			if is_moved:
+				if not sect_new:
+					self.__bounds_ccb(inst)
+					return
 				del d[id]
 				if sect_new not in self.__dynamic_instances:
 					self.__dynamic_instances[sect_new] = {}
@@ -650,9 +676,11 @@ class LODSections(KX_GameObject):
 			elif suspend:
 				self.__suspend_instance(inst)
 			d[id] = [inst, [transform, properties]]
-			print("Suspended and {} {}: {}".format("moved to" if is_moved else "updated in" if inst else "removed from", sect_name, id))
+			ut.addon_print("Suspended and {} {}: {}".format("moved to" if is_moved else "updated in" if inst else "removed from", sect_name, id))
 
 	def __suspend_instance(self, inst: Union[KX_GameObject, Any]):
+		if inst.isSuspendDynamics:
+			return
 		inst.worldLinearVelocity.zero()
 		inst.worldAngularVelocity.zero()
 		inst.suspendDynamics()
@@ -702,7 +730,7 @@ class LODSections(KX_GameObject):
 						inst.worldAngularVelocity.zero()
 						if ut.CUST_PROP_NAME in inst.getPropertyNames():
 							self.__suspend_instance(inst)
-							print("Suspended mutated in {}: {}".format(sect_name, id))
+							ut.addon_print("Suspended mutated in {}: {}".format(sect_name, id))
 						else:
 							self.__settle_instance_register(inst, sect_name, id)
 
@@ -722,13 +750,21 @@ class LODSections(KX_GameObject):
 						if not ut.CUST_PROP_NAME in inst.getPropertyNames():
 							inst.worldPosition.z += OBJ_BOUNDS_MARGIN
 						inst.restoreDynamics()
-						print("Restored in {}: {}".format(sect_name, id))
+						ut.addon_print("Restored in {}: {}".format(sect_name, id))
 
 	def __bounds_ccb(self, hit_obj: KX_GameObject):
+		if not hit_obj:
+			return
+		
+		if hit_obj.parent:
+			self.__bounds_ccb(hit_obj.parent)
+			return
+
+		if hit_obj in self.__players:
+			hit_obj.worldTransform = self.__players[hit_obj]
+			return
+		
 		hit_obj_name = hit_obj.name
-
-		print("Out of bounds: {}".format(hit_obj_name))
-
 		if ut.ID_PROP_NAME in hit_obj.getPropertyNames():
 			hit_obj_id = hit_obj[ut.ID_PROP_NAME]
 			for sect_name, sect_dict in self.__dynamic_instances.items():
@@ -742,21 +778,13 @@ class LODSections(KX_GameObject):
 							continue
 						hit_obj.worldLinearVelocity.zero()
 						hit_obj.worldAngularVelocity.zero()
-						v_mp, v_dim = ut.get_median_point_and_dimensions(hit_obj)
-						t = self.worldTransform * Matrix(data[0])
-						t.translation.z += v_dim.z * 0.5 + v_mp.z + OBJ_BOUNDS_MARGIN
-						hit_obj.worldTransform = t
+						hit_obj.worldTransform = self.worldTransform * Matrix(data[0])
 
-						print("Set within bounds of {}: {}".format(sect_name, id))
+						ut.addon_print("Restored within bounds to {}: {}".format(sect_name, id))
 						return
 
-		elif hit_obj.parent is not None:
-			self.__bounds_ccb(hit_obj.parent)
-			return
-
 		hit_obj.endObject()
-
-		print("Ended: {}".format(hit_obj_name))
+		ut.addon_print("Ended out of bounds: {}".format(hit_obj_name))
 
 	def __get_physical_sections(self) -> List[str]:
 		return [n for n in self.__visual_sections if self.scene.objects[n].currentLodLevel == 1]
@@ -894,7 +922,7 @@ class LODSections(KX_GameObject):
 
 		if self.__index == self.__num_parts:
 			self.__index = 0
-			print("Restoring dynamics for unsettled instances")
+			ut.addon_print("Restoring dynamics for unsettled instances")
 			for sect_name in self.visual_sections:
 				if sect_name in self.__dynamic_instances:
 					for _, d in self.__dynamic_instances[sect_name].items():
@@ -918,14 +946,14 @@ class LODSections(KX_GameObject):
 
 			for d in self.__dynamic_instances[sect_name].values():
 				for id, (inst, _) in d.items():
-					if id in self.__tmp or inst.isSuspendDynamics:
+					if id in self.__tmp or not inst or inst.isSuspendDynamics:
 						continue
 
 					self.__settle_instance_register(inst, sect_name, id)
 					unsettled_count += 1
 
 		if unsettled_count + len(self.__tmp) == 0:
-			print("Settled all dynamic instances")
+			ut.addon_print("Settled all dynamic instances")
 			self.__tmp.clear()
 			if self.__target:
 				self.__target_position = self.__target.worldPosition.copy()
@@ -934,7 +962,7 @@ class LODSections(KX_GameObject):
 			if self.__has_physics:
 				physical_sections = self.__get_physical_sections()
 				self.__remove_physical_sections(physical_sections)
-			print("Starting update state with {}/{} of physical/visual sections".format(len(self.physical_sections), len(self.visual_sections)))
+			ut.addon_print("Starting with {}/{} of physical/visual sections".format(len(self.physical_sections), len(self.visual_sections)))
 			self.state = self.STATE_UPDATE
 
 	def update(self):
@@ -951,10 +979,19 @@ class LODSections(KX_GameObject):
 			self.__restore_instances()
 
 	def end(self):
+		ut.addon_print("Ending with {}/{} of physical/visual sections".format(len(self.physical_sections), len(self.visual_sections)))
 		self.__remove_physical_sections()
 		self.__remove_visual_sections()
 		ut.remove_from_module_instances(self)
 		KX_GameObject.endObject(self)
+
+	def register_player(self, obj: KX_GameObject, transform: Matrix):
+		self.__players[obj] = transform
+		ut.addon_print("Registered {}".format(obj.name))
+
+	def unregister_player(self, obj: KX_GameObject):
+		del self.__players[obj]
+		ut.addon_print("Unregistered {}".format(obj.name))
 
 	@property
 	def has_physics(self):
